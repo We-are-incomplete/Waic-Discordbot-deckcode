@@ -159,7 +159,7 @@ async def on_message(message):
 
     if triggered_by_kcg or triggered_by_slashes:
         if spreadsheet is None or global_creds is None:
-            await message.channel.send(
+            await message.reply(
                 "エラー: Google Sheetsの接続または認証情報が初期化されていません。設定を確認してください。")
             return
 
@@ -172,11 +172,11 @@ async def on_message(message):
                 worksheet_for_write = spreadsheet.worksheet(
                     WRITE_TARGET_SHEET_NAME)
             except gspread.exceptions.WorksheetNotFound:
-                await message.channel.send(
+                await message.reply(
                     f"エラー: 書き込み用シート '{WRITE_TARGET_SHEET_NAME}' が見つかりませんでした。")
                 return
             except Exception as e:
-                await message.channel.send(
+                await message.reply(
                     f"書き込み用シート '{WRITE_TARGET_SHEET_NAME}' を開く際に予期せぬエラーが発生しました: {e}"
                 )
                 print(f"書き込みシートオープンエラー詳細: {e}")
@@ -208,11 +208,11 @@ async def on_message(message):
                     IMAGE_CAPTURE_SHEET_NAME)
                 sheet_gid_for_image = worksheet_for_image.id
             except gspread.exceptions.WorksheetNotFound:
-                await message.channel.send(
+                await message.reply(
                     f"エラー: 画像生成用シート '{IMAGE_CAPTURE_SHEET_NAME}' が見つかりませんでした。")
                 return
             except Exception as e:
-                await message.channel.send(
+                await message.reply(
                     f"画像生成用シート '{IMAGE_CAPTURE_SHEET_NAME}' の情報を取得する際に予期せぬエラーが発生しました: {e}"
                 )
                 print(f"画像シート情報取得エラー詳細: {e}")
@@ -220,7 +220,7 @@ async def on_message(message):
                 return
 
             if SPREADSHEET_ID is None or sheet_gid_for_image is None:
-                await message.channel.send(
+                await message.reply(
                     "エラー: 画像生成に必要なスプレッドシートIDまたはシートGIDが取得できません。")
                 return
 
@@ -231,9 +231,9 @@ async def on_message(message):
             if image_bytes:
                 discord_file = discord.File(fp=image_bytes,
                                             filename="spreadsheet_capture.png")
-                await message.channel.send(file=discord_file)
+                await message.reply(file=discord_file)
             else:
-                await message.channel.send(f"画像の生成に失敗しました。コンソールログで詳細を確認してください。"
+                await message.reply(f"画像の生成に失敗しました。コンソールログで詳細を確認してください。"
                                            )
 
         except gspread.exceptions.APIError as e_gspread:
@@ -242,21 +242,21 @@ async def on_message(message):
                 error_code = error_details.get('code')
                 error_msg = error_details.get('message', str(e_gspread))
                 if error_code == 403:
-                    await message.channel.send(
+                    await message.reply(
                         f"スプレッドシートへの書き込み/読み取り権限がありません。シートの共有設定やAPIの有効化を確認してください。\nエラー: {error_msg}"
                     )
                 else:
-                    await message.channel.send(
+                    await message.reply(
                         f"スプレッドシート操作中にAPIエラーが発生しました (コード: {error_code}): {error_msg}"
                     )
             else:
-                await message.channel.send(
+                await message.reply(
                     f"スプレッドシート操作中にAPIエラーが発生しました: {e_gspread}")
             print(f"Google API Error: {e_gspread}")
             traceback.print_exc()
 
         except Exception as e:
-            await message.channel.send(
+            await message.reply(
                 f"処理中に予期せぬエラーが発生しました: {type(e).__name__} - {e}")
             print(f"予期せぬエラー詳細 (on_message): {e}")
             traceback.print_exc()
