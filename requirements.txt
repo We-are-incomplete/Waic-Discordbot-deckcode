@@ -1,0 +1,10 @@
+discord.py==2.3.2  # Zenn記事のバージョンに合わせていますが、最新でも可
+gspread
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+pdf2image
+requests
+Pillow
+Flask # keep_alive.py で使用
+# python-dotenv はKoyebでは環境変数を直接設定するため必須ではない
