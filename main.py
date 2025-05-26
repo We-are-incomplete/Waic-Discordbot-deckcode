@@ -10,6 +10,8 @@ import asyncio
 import json
 import urllib.parse
 import traceback
+from PIL import Image, ImageDraw, ImageFont, ImageChops # ImageChops を追加
+
 
 # 0. 環境変数 (Secrets) から情報を取得
 DISCORD_TOKEN = os.environ.get('DISCORD_TOKEN')
@@ -63,71 +65,108 @@ else:
 
 
 # 3. PDFエクスポートとpdf2imageで画像を生成する関数
-def create_spreadsheet_image_from_pdf(gs_spreadsheet_id, sheet_gid_to_capture,
-                                      sheet_range_to_capture, credentials_obj):
+def create_spreadsheet_image_from_pdf(gs_spreadsheet_id, sheet_gid_to_capture, sheet_range_to_capture, credentials_obj):
     try:
         if not credentials_obj:
             raise ValueError("認証情報オブジェクトが提供されていません。")
 
         base_export_url = f"https://docs.google.com/spreadsheets/d/{gs_spreadsheet_id}/export"
-
+        
         export_params = {
             "format": "pdf",
             "gid": str(sheet_gid_to_capture),
             "range": sheet_range_to_capture,
             "portrait": "false",
-            "scale": "4",
+            "scale": "4", 
             "gridlines": "true",
             "printtitle": "false",
             "sheetnames": "false",
             "pagenumbers": "false",
             "attachment": "false",
-            "top_margin": "0.25",
-            "bottom_margin": "0.25",
-            "left_margin": "0.25",
-            "right_margin": "0.25"
+            "top_margin": "0.01",
+            "bottom_margin": "0.01",
+            "left_margin": "0.01",
+            "right_margin": "0.01"
         }
-
+        
         pdf_export_url = f"{base_export_url}?{urllib.parse.urlencode(export_params)}"
-        print(f"PDFエクスポートURL: {pdf_export_url}")
+        print(f"PDFエクスポートURL (マージン・CropBox調整版): {pdf_export_url}")
 
         if not credentials_obj.valid:
             print("アクセストークンが無効または期限切れのため、リフレッシュします。")
             credentials_obj.refresh(GoogleAuthRequest())
-
+        
         access_token = credentials_obj.token
         if not access_token:
             raise ValueError("アクセストークンの取得に失敗しました。")
-
+            
         headers = {'Authorization': 'Bearer ' + access_token}
-
+        
         response = requests.get(pdf_export_url, headers=headers, timeout=30)
         response.raise_for_status()
-
+        
         pdf_bytes = response.content
-
+        
         if not pdf_bytes:
             raise ValueError("ダウンロードされたPDFデータが空です。")
 
-        images = convert_from_bytes(pdf_bytes,
-                                    dpi=200,
-                                    first_page=1,
-                                    last_page=1)
-
+        images = convert_from_bytes(pdf_bytes, dpi=200, first_page=1, last_page=1, use_cropbox=True) 
+        
         if not images:
             raise ValueError("PDFから画像を変換できませんでした。")
+        
+        img_obj = images[0]
+
+        # --- ▼▼▼ Pillowによる自動トリミング処理を有効化 ▼▼▼ ---
+        print(f"トリミング前の画像サイズ: {img_obj.size}, モード: {img_obj.mode}")
+
+        # RGBAモードの場合、アルファチャンネルを考慮して一度白い背景に合成してからRGBに変換する
+        # または、アルファチャンネルに基づいて getbbox を使うなど、より高度な処理も可能
+        # ここでは、一度RGBに変換して白背景との差分でトリミングを試みる
+        if img_obj.mode == 'RGBA':
+            # 透明部分を白で埋めたRGB画像を作成して処理する
+            background = Image.new("RGB", img_obj.size, (255, 255, 255))
+            background.paste(img_obj, mask=img_obj.split()[3]) # Paste using alpha channel as mask
+            img_to_crop = background
+            print("RGBA画像を白背景に合成してRGB化しました。")
+        elif img_obj.mode != 'RGB':
+            img_to_crop = img_obj.convert('RGB')
+            print(f"{img_obj.mode}画像をRGBに変換しました。")
+        else:
+            img_to_crop = img_obj
+
+        # 白い背景画像との差分を取得して、コンテンツのバウンディングボックス（境界領域）を見つける
+        bg = Image.new(img_to_crop.mode, img_to_crop.size, (255, 255, 255)) # 白い背景を生成
+        diff = ImageChops.difference(img_to_crop, bg)
+        
+        # 差分がほぼない（非常に明るい色が支配的）場合でもbboxが取得できるように、
+        # 差分を強調したり、閾値処理をしたりすることも考えられるが、まずはシンプルなdifferenceで試す
+        # diff.show() # デバッグ用に差分画像を表示したい場合 (Replitでは不可)
+        
+        bbox = diff.getbbox() # 差分（つまり非白色部分）のバウンディングボックス
+
+        if bbox:
+            print(f"コンテンツのバウンディングボックスが見つかりました: {bbox}")
+            # 元の画像(img_obj, RGBAの可能性あり)からbboxでクロップ
+            cropped_img = img_obj.crop(bbox) 
+            print(f"トリミング後の画像サイズ: {cropped_img.size}")
+            img_obj_to_save = cropped_img
+        else:
+            print("バウンディングボックスが見つかりませんでした。画像全体が均一色（白など）の可能性があります。トリミングをスキップします。")
+            img_obj_to_save = img_obj # 元の画像をそのまま使用
+        # --- ▲▲▲ Pillowによる自動トリミング処理終了 ▲▲▲ ---
 
         img_byte_arr = io.BytesIO()
-        images[0].save(img_byte_arr, format='PNG')
+        img_obj_to_save.save(img_byte_arr, format='PNG') # トリミングされた(または元の)画像を保存
         img_byte_arr.seek(0)
-
-        print("PDFから画像の生成に成功しました。")
+        
+        print("PDFから画像の生成に成功しました (トリミング試行済み)。")
         return img_byte_arr
 
     except requests.exceptions.HTTPError as http_err:
         print(f"PDFダウンロード時のHTTPエラー: {http_err}")
         error_response_text = "N/A"
-        if http_err.response is not None:
+        if hasattr(http_err, 'response') and http_err.response is not None:
             error_response_text = http_err.response.text[:500]
         print(f"レスポンス内容 (冒頭500文字): {error_response_text}")
         return None
@@ -135,7 +174,6 @@ def create_spreadsheet_image_from_pdf(gs_spreadsheet_id, sheet_gid_to_capture,
         print(f"画像生成(PDF経由)中にエラーが発生しました: {e}")
         traceback.print_exc()
         return None
-
 
 @client.event
 async def on_ready():
